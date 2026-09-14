@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="ExamEngine.Api/ExamEngine.Api.csproj" />
+  <Project Path="ExamEngine.Application/ExamEngine.Application.csproj" />
+  <Project Path="ExamEngine.Domain/ExamEngine.Domain.csproj" />
+  <Project Path="ExamEngine.Infrastructure/ExamEngine.Infrastructure.csproj" />
+</Solution>
