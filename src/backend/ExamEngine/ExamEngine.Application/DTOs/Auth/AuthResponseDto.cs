@@ -13,5 +13,15 @@ namespace ExamEngine.Application.DTOs.Auth
         public string Email { get; set; } = string.Empty;
         public string Role { get; set; } = string.Empty;
         public string AccessToken { get; set; } = string.Empty;
+        public string RefreshToken { get; set; } = string.Empty;
+    }
+    public class RefreshTokenRequestDto
+    {
+        public string RefreshToken { get; set; } = string.Empty;
+    }
+
+    public class RevokeTokenRequestDto
+    {
+        public string RefreshToken { get; set; } = string.Empty;
     }
 }

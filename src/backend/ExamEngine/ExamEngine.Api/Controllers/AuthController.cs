@@ -58,4 +58,22 @@ public class AuthController : ControllerBase
     {
         return Ok(ApiResponse<string>.SuccessResult("Chào mừng Giảng viên truy cập khu vực quản lý đề thi!"));
     }
+
+    [HttpPost("refresh-token")]
+    public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenRequestDto request)
+    {
+        var result = await _authService.RefreshTokenAsync(request);
+        return Ok(ApiResponse<AuthResponseDto>.SuccessResult(result, "Làm mới Token thành công."));
+    }
+
+    [HttpPost("revoke-token")]
+    public async Task<IActionResult> RevokeToken([FromBody] RevokeTokenRequestDto request)
+    {
+        var success = await _authService.RevokeTokenAsync(request);
+        if (!success)
+        {
+            return BadRequest(ApiResponse<string>.FailureResult("Token không hợp lệ hoặc đã bị thu hồi trước đó."));
+        }
+        return Ok(ApiResponse<string>.SuccessResult("Thu hồi Token thành công (Đăng xuất thiết bị)."));
+    }
 }

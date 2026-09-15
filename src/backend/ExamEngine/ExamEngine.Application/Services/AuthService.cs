@@ -27,7 +27,6 @@ public class AuthService : IAuthService
         var cleanEmail = request.Email.Trim().ToLowerInvariant();
         var cleanFullName = request.FullName.Trim();
 
-        // NẾU KHÔNG TRUYỀN ROLENAME HOẶC ĐỂ TRỐNG -> TỰ ĐỘNG LẤY "Student"
         var targetRoleName = string.IsNullOrWhiteSpace(request.RoleName) ? "Student" : request.RoleName.Trim();
 
         // 2. Kiểm tra mật khẩu xác nhận
@@ -49,7 +48,7 @@ public class AuthService : IAuthService
             throw new Exception("Vai trò đăng ký không hợp lệ. Chỉ chấp nhận Student hoặc Instructor.");
         }
 
-        // 5. Kiểm tra trùng Email bằng email đã làm sạch
+        // 5. Kiểm tra trùng Email
         var isEmailTaken = await _context.Users.AnyAsync(u => u.Email.ToLower() == cleanEmail);
         if (isEmailTaken)
         {
@@ -68,7 +67,7 @@ public class AuthService : IAuthService
         // 7. Băm mật khẩu
         var hashedPassword = _passwordHasher.HashPassword(request.Password);
 
-        // 8. Tạo User với dữ liệu ĐÃ ĐƯỢC LÀM SẠCH
+        // 8. Tạo User
         var newUser = new User
         {
             Id = Guid.NewGuid(),
@@ -77,14 +76,29 @@ public class AuthService : IAuthService
             PasswordHash = hashedPassword,
             RoleId = role.Id,
             CreatedAt = DateTime.UtcNow,
-            IsActive = true
+            IsActive = true,
+            IsEmailConfirmed = false
         };
 
         await _context.Users.AddAsync(newUser);
         await _context.SaveChangesAsync();
 
-        // 9. Sinh JWT Token
+        // 9. Sinh Access Token và Refresh Token
         var token = _jwtTokenGenerator.GenerateToken(newUser, role.Name);
+        var refreshTokenString = _jwtTokenGenerator.GenerateRefreshToken();
+
+        var refreshToken = new RefreshToken
+        {
+            Id = Guid.NewGuid(),
+            Token = refreshTokenString,
+            UserId = newUser.Id,
+            ExpiresAtUtc = DateTime.UtcNow.AddDays(7),
+            CreatedAtUtc = DateTime.UtcNow,
+            IsRevoked = false
+        };
+
+        await _context.RefreshTokens.AddAsync(refreshToken);
+        await _context.SaveChangesAsync();
 
         return new AuthResponseDto
         {
@@ -92,7 +106,8 @@ public class AuthService : IAuthService
             FullName = newUser.FullName,
             Email = newUser.Email,
             Role = role.Name,
-            AccessToken = token
+            AccessToken = token,
+            RefreshToken = refreshTokenString
         };
     }
 
@@ -122,7 +137,23 @@ public class AuthService : IAuthService
         var role = await _context.Roles.FirstOrDefaultAsync(r => r.Id == user.RoleId);
         var roleName = role != null ? role.Name : "Student";
 
-        var token = _jwtTokenGenerator.GenerateToken(user, roleName);
+        // 1. Sinh Tokens
+        var accessToken = _jwtTokenGenerator.GenerateToken(user, roleName);
+        var refreshTokenString = _jwtTokenGenerator.GenerateRefreshToken();
+
+        // 2. Lưu Refresh Token vào Database (Hạn 7 ngày)
+        var refreshToken = new RefreshToken
+        {
+            Id = Guid.NewGuid(),
+            Token = refreshTokenString,
+            UserId = user.Id,
+            ExpiresAtUtc = DateTime.UtcNow.AddDays(7),
+            CreatedAtUtc = DateTime.UtcNow,
+            IsRevoked = false
+        };
+
+        await _context.RefreshTokens.AddAsync(refreshToken);
+        await _context.SaveChangesAsync();
 
         return new AuthResponseDto
         {
@@ -130,7 +161,76 @@ public class AuthService : IAuthService
             FullName = user.FullName,
             Email = user.Email,
             Role = roleName,
-            AccessToken = token
+            AccessToken = accessToken,
+            RefreshToken = refreshTokenString
         };
+    }
+
+    public async Task<AuthResponseDto> RefreshTokenAsync(RefreshTokenRequestDto request)
+    {
+        // 1. Tìm Refresh Token
+        var existingToken = await _context.RefreshTokens
+            .Include(rt => rt.User)
+            .FirstOrDefaultAsync(rt => rt.Token == request.RefreshToken);
+
+        if (existingToken == null || existingToken.IsRevoked || existingToken.ExpiresAtUtc <= DateTime.UtcNow)
+        {
+            throw new UnauthorizedAccessException("Refresh Token không hợp lệ hoặc đã hết hạn.");
+        }
+
+        var user = existingToken.User;
+        if (user == null || !user.IsActive)
+        {
+            throw new UnauthorizedAccessException("Người dùng không hợp lệ hoặc tài khoản đã bị khóa.");
+        }
+
+        // 2. Lấy role của user
+        var role = await _context.Roles.FirstOrDefaultAsync(r => r.Id == user.RoleId);
+        var roleName = role != null ? role.Name : "Student";
+
+        // 3. TOKEN ROTATION: Thu hồi vé cũ để chống tấn công phát lại (Replay Attack)
+        existingToken.IsRevoked = true;
+
+        // 4. Cấp cặp token mới
+        var newAccessToken = _jwtTokenGenerator.GenerateToken(user, roleName);
+        var newRefreshTokenString = _jwtTokenGenerator.GenerateRefreshToken();
+
+        var newRefreshToken = new RefreshToken
+        {
+            Id = Guid.NewGuid(),
+            Token = newRefreshTokenString,
+            UserId = user.Id,
+            ExpiresAtUtc = DateTime.UtcNow.AddDays(7),
+            CreatedAtUtc = DateTime.UtcNow,
+            IsRevoked = false
+        };
+
+        await _context.RefreshTokens.AddAsync(newRefreshToken);
+        await _context.SaveChangesAsync();
+
+        return new AuthResponseDto
+        {
+            UserId = user.Id,
+            FullName = user.FullName,
+            Email = user.Email,
+            Role = roleName,
+            AccessToken = newAccessToken,
+            RefreshToken = newRefreshTokenString
+        };
+    }
+
+    public async Task<bool> RevokeTokenAsync(RevokeTokenRequestDto request)
+    {
+        var token = await _context.RefreshTokens
+            .FirstOrDefaultAsync(rt => rt.Token == request.RefreshToken);
+
+        if (token == null || token.IsRevoked)
+        {
+            return false;
+        }
+
+        token.IsRevoked = true;
+        await _context.SaveChangesAsync();
+        return true;
     }
 }

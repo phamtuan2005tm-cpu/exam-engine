@@ -15,7 +15,7 @@ namespace ExamEngine.Domain.Entities
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public DateTime? UpdatedAt { get; set; }
         public bool IsActive { get; set; } = true;
-
+        public bool IsEmailConfirmed { get; set; } = false;
         public int RoleId { get; set; }
         public Role Role { get; set; } = null!;
    
