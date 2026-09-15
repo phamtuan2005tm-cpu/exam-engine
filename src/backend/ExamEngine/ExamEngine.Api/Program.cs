@@ -1,6 +1,7 @@
-using ExamEngine.Infrastructure;
+using ExamEngine.Api.Middlewares;
 using ExamEngine.Application.Interfaces;
 using ExamEngine.Application.Services;
+using ExamEngine.Infrastructure;
 using ExamEngine.Infrastructure.Data;
 using ExamEngine.Infrastructure.Security;
 
@@ -33,6 +34,16 @@ namespace ExamEngine.Api
             // 3. Đăng ký tầng nghiệp vụ Application Service
             builder.Services.AddScoped<IAuthService, AuthService>();
             var app = builder.Build();
+
+            app.UseMiddleware<ExceptionHandlingMiddleware>();
+
+            if (app.Environment.IsDevelopment())
+            {
+                app.UseSwagger();
+                app.UseSwaggerUI();
+            }
+
+            app.UseHttpsRedirection();
 
             // Configure the HTTP request pipeline.
             if (app.Environment.IsDevelopment())

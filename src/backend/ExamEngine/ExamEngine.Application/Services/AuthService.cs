@@ -23,44 +23,40 @@ public class AuthService : IAuthService
 
     public async Task<AuthResponseDto> RegisterAsync(RegisterRequestDto request)
     {
-        // 1. Kiểm tra xác nhận mật khẩu
+        // 1. Chuẩn hóa dữ liệu đầu vào
+        var cleanEmail = request.Email.Trim().ToLowerInvariant();
+        var cleanFullName = request.FullName.Trim();
+
+        // NẾU KHÔNG TRUYỀN ROLENAME HOẶC ĐỂ TRỐNG -> TỰ ĐỘNG LẤY "Student"
+        var targetRoleName = string.IsNullOrWhiteSpace(request.RoleName) ? "Student" : request.RoleName.Trim();
+
+        // 2. Kiểm tra mật khẩu xác nhận
         if (request.Password != request.ConfirmPassword)
         {
             throw new Exception("Mật khẩu xác nhận không khớp.");
         }
 
-        // 2. Chặn đăng ký quyền Admin trái phép
-        if (request.RoleName.Equals("Admin", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new Exception("Không được phép đăng ký vai trò Quản trị viên.");
-        }
-
-        // 3. Kiểm tra trùng Email
-        var isEmailTaken = await _context.Users
-            .AnyAsync(u => u.Email.ToLower() == request.Email.ToLower());
-
-        if (isEmailTaken)
-        {
-            throw new Exception("Email này đã được sử dụng.");
-        }
-
-        // 4. Mặc định người đăng ký luôn là Student nếu không truyền
-        var targetRoleName = string.IsNullOrWhiteSpace(request.RoleName) ? "Student" : request.RoleName.Trim();
-
-        // 1. Chặn tuyệt đối không cho tự đăng ký quyền Admin
+        // 3. Chặn đăng ký quyền Admin
         if (targetRoleName.Equals("Admin", StringComparison.OrdinalIgnoreCase))
         {
             throw new Exception("Không được phép đăng ký vai trò Quản trị viên.");
         }
 
-        // 2. Chỉ cho phép 2 vai trò hợp lệ trong hệ thống thi: Student hoặc Instructor
+        // 4. Chỉ chấp nhận Student hoặc Instructor
         var allowedRoles = new[] { "Student", "Instructor" };
         if (!allowedRoles.Any(r => r.Equals(targetRoleName, StringComparison.OrdinalIgnoreCase)))
         {
             throw new Exception("Vai trò đăng ký không hợp lệ. Chỉ chấp nhận Student hoặc Instructor.");
         }
 
-        // 3. Tìm Role trong cơ sở dữ liệu
+        // 5. Kiểm tra trùng Email bằng email đã làm sạch
+        var isEmailTaken = await _context.Users.AnyAsync(u => u.Email.ToLower() == cleanEmail);
+        if (isEmailTaken)
+        {
+            throw new Exception("Email này đã được sử dụng.");
+        }
+
+        // 6. Tìm Role trong Database
         var role = await _context.Roles
             .FirstOrDefaultAsync(r => r.Name.ToLower() == targetRoleName.ToLower());
 
@@ -69,15 +65,15 @@ public class AuthService : IAuthService
             throw new Exception($"Hệ thống chưa khởi tạo vai trò '{targetRoleName}'.");
         }
 
-        // 5. Băm mật khẩu thông qua Interface
+        // 7. Băm mật khẩu
         var hashedPassword = _passwordHasher.HashPassword(request.Password);
 
-        // 6. Tạo đối tượng User và lưu vào PostgreSQL
+        // 8. Tạo User với dữ liệu ĐÃ ĐƯỢC LÀM SẠCH
         var newUser = new User
         {
             Id = Guid.NewGuid(),
-            FullName = request.FullName,
-            Email = request.Email,
+            FullName = cleanFullName,
+            Email = cleanEmail,
             PasswordHash = hashedPassword,
             RoleId = role.Id,
             CreatedAt = DateTime.UtcNow,
@@ -87,10 +83,9 @@ public class AuthService : IAuthService
         await _context.Users.AddAsync(newUser);
         await _context.SaveChangesAsync();
 
-        // 7. Tạo mã Token thông qua Interface
+        // 9. Sinh JWT Token
         var token = _jwtTokenGenerator.GenerateToken(newUser, role.Name);
 
-        // 8. Trả kết quả về Controller
         return new AuthResponseDto
         {
             UserId = newUser.Id,
@@ -103,36 +98,32 @@ public class AuthService : IAuthService
 
     public async Task<AuthResponseDto> LoginAsync(LoginRequestDto request)
     {
-        // 1. Tìm User theo Email
+        var cleanEmail = request.Email.Trim().ToLowerInvariant();
+
         var user = await _context.Users
-            .FirstOrDefaultAsync(u => u.Email.ToLower() == request.Email.ToLower());
+            .FirstOrDefaultAsync(u => u.Email.ToLower() == cleanEmail);
 
         if (user == null)
         {
             throw new Exception("Tài khoản hoặc mật khẩu không chính xác.");
         }
 
-        // 2. Kiểm tra trạng thái tài khoản
         if (!user.IsActive)
         {
             throw new Exception("Tài khoản của bạn đã bị khóa.");
         }
 
-        // 3. So khớp mật khẩu qua Interface
         var isPasswordValid = _passwordHasher.VerifyPassword(request.Password, user.PasswordHash);
         if (!isPasswordValid)
         {
             throw new Exception("Tài khoản hoặc mật khẩu không chính xác.");
         }
 
-        // 4. Lấy Role tương ứng
         var role = await _context.Roles.FirstOrDefaultAsync(r => r.Id == user.RoleId);
         var roleName = role != null ? role.Name : "Student";
 
-        // 5. Sinh JWT Token
         var token = _jwtTokenGenerator.GenerateToken(user, roleName);
 
-        // 6. Trả kết quả về Controller
         return new AuthResponseDto
         {
             UserId = user.Id,
