@@ -2,7 +2,8 @@
 using ExamEngine.Application.DTOs.Auth;
 using ExamEngine.Application.Interfaces;
 using Microsoft.AspNetCore.Mvc;
-
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
 namespace ExamEngine.Api.Controllers;
 
 [ApiController]
@@ -31,5 +32,30 @@ public class AuthController : ControllerBase
     {
         var result = await _authService.LoginAsync(request);
         return Ok(ApiResponse<AuthResponseDto>.SuccessResult(result, "Đăng nhập thành công."));
+    }
+
+    [Authorize]
+    [HttpGet("me")]
+    public IActionResult GetCurrentUserProfile()
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        var email = User.FindFirstValue(ClaimTypes.Email);
+        var role = User.FindFirstValue(ClaimTypes.Role);
+
+        var data = new
+        {
+            UserId = userId,
+            Email = email,
+            Role = role
+        };
+
+        return Ok(ApiResponse<object>.SuccessResult(data, "Lấy thông tin người dùng từ Token thành công."));
+    }
+
+    [Authorize(Roles = "Instructor")]
+    [HttpGet("instructor-only")]
+    public IActionResult CheckInstructorAccess()
+    {
+        return Ok(ApiResponse<string>.SuccessResult("Chào mừng Giảng viên truy cập khu vực quản lý đề thi!"));
     }
 }

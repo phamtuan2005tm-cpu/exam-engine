@@ -1,9 +1,13 @@
+using System.Text;
 using ExamEngine.Api.Middlewares;
 using ExamEngine.Application.Interfaces;
 using ExamEngine.Application.Services;
 using ExamEngine.Infrastructure;
 using ExamEngine.Infrastructure.Data;
 using ExamEngine.Infrastructure.Security;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
 
 namespace ExamEngine.Api
 {
@@ -13,28 +17,81 @@ namespace ExamEngine.Api
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            // Add services to the container.
-
+            // 1. Controller
             builder.Services.AddControllers();
-            // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
-            builder.Services.AddEndpointsApiExplorer();
-            builder.Services.AddSwaggerGen();
 
-            // Đăng ký toàn bộ dịch vụ của tầng Infrastructure
+            // 2. Cấu hình JWT Authentication khớp với appsettings.json
+            var jwtSettings = builder.Configuration.GetSection("JwtSettings");
+            var secretKey = jwtSettings["Secret"]
+                ?? throw new InvalidOperationException("Chưa cấu hình JwtSettings:Secret trong appsettings.json");
+
+            builder.Services.AddAuthentication(options =>
+            {
+                options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+                options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+            })
+            .AddJwtBearer(options =>
+            {
+                options.TokenValidationParameters = new TokenValidationParameters
+                {
+                    ValidateIssuer = true,
+                    ValidateAudience = true,
+                    ValidateLifetime = true,
+                    ValidateIssuerSigningKey = true,
+                    ValidIssuer = jwtSettings["Issuer"],
+                    ValidAudience = jwtSettings["Audience"],
+                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey)),
+                    ClockSkew = TimeSpan.Zero
+                };
+            });
+
+            builder.Services.AddAuthorization();
+
+            // 3. Swagger kèm nút Authorize (Bearer Token)
+            builder.Services.AddEndpointsApiExplorer();
+            builder.Services.AddSwaggerGen(c =>
+            {
+                c.SwaggerDoc("v1", new OpenApiInfo { Title = "ExamEngine API", Version = "v1" });
+
+                c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+                {
+                    Description = "Nhập Token theo cú pháp: Bearer {token_của_bạn}",
+                    Name = "Authorization",
+                    In = ParameterLocation.Header,
+                    Type = SecuritySchemeType.ApiKey,
+                    Scheme = "Bearer"
+                });
+
+                c.AddSecurityRequirement(new OpenApiSecurityRequirement
+                {
+                    {
+                        new OpenApiSecurityScheme
+                        {
+                            Reference = new OpenApiReference
+                            {
+                                Type = ReferenceType.SecurityScheme,
+                                Id = "Bearer"
+                            }
+                        },
+                        Array.Empty<string>()
+                    }
+                });
+            });
+
+            // 4. Đăng ký tầng Infrastructure & Dependency Injection
             builder.Services.AddInfrastructureServices(builder.Configuration);
 
-            // 1. Đăng ký các dịch vụ Security & Token
             builder.Services.AddScoped<IPasswordHasher, PasswordHasher>();
             builder.Services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
 
-            // 2. Đăng ký DbContext interface
             builder.Services.AddScoped<IApplicationDbContext>(provider =>
                 provider.GetRequiredService<ApplicationDbContext>());
 
-            // 3. Đăng ký tầng nghiệp vụ Application Service
             builder.Services.AddScoped<IAuthService, AuthService>();
+
             var app = builder.Build();
 
+            // 5. Pipeline xử lý Request
             app.UseMiddleware<ExceptionHandlingMiddleware>();
 
             if (app.Environment.IsDevelopment())
@@ -45,17 +102,9 @@ namespace ExamEngine.Api
 
             app.UseHttpsRedirection();
 
-            // Configure the HTTP request pipeline.
-            if (app.Environment.IsDevelopment())
-            {
-                app.UseSwagger();
-                app.UseSwaggerUI();
-            }
-
-            app.UseHttpsRedirection();
-
+            // Thứ tự bắt buộc: Xác thực trước, phân quyền sau
+            app.UseAuthentication();
             app.UseAuthorization();
-
 
             app.MapControllers();
 
