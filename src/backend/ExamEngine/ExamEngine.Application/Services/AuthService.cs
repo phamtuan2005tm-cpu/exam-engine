@@ -10,15 +10,18 @@ public class AuthService : IAuthService
     private readonly IApplicationDbContext _context;
     private readonly IPasswordHasher _passwordHasher;
     private readonly IJwtTokenGenerator _jwtTokenGenerator;
+    private readonly IEmailService _emailService;
 
     public AuthService(
         IApplicationDbContext context,
         IPasswordHasher passwordHasher,
-        IJwtTokenGenerator jwtTokenGenerator)
+        IJwtTokenGenerator jwtTokenGenerator,
+        IEmailService emailService)
     {
         _context = context;
         _passwordHasher = passwordHasher;
         _jwtTokenGenerator = jwtTokenGenerator;
+        _emailService = emailService;
     }
 
     public async Task<AuthResponseDto> RegisterAsync(RegisterRequestDto request)
@@ -67,7 +70,10 @@ public class AuthService : IAuthService
         // 7. Băm mật khẩu
         var hashedPassword = _passwordHasher.HashPassword(request.Password);
 
-        // 8. Tạo User
+        // 8. Sinh mã OTP 6 số xác thực
+        var verificationOtp = new Random().Next(100000, 999999).ToString();
+
+        // 9. Tạo User ở trạng thái chưa kích hoạt
         var newUser = new User
         {
             Id = Guid.NewGuid(),
@@ -77,38 +83,71 @@ public class AuthService : IAuthService
             RoleId = role.Id,
             CreatedAt = DateTime.UtcNow,
             IsActive = true,
-            IsEmailConfirmed = false
+            IsEmailConfirmed = false,
+            VerificationToken = verificationOtp,
+            VerificationTokenExpiresAt = DateTime.UtcNow.AddMinutes(15) // Hết hạn sau 15 phút
         };
 
         await _context.Users.AddAsync(newUser);
         await _context.SaveChangesAsync();
 
-        // 9. Sinh Access Token và Refresh Token
-        var token = _jwtTokenGenerator.GenerateToken(newUser, role.Name);
-        var refreshTokenString = _jwtTokenGenerator.GenerateRefreshToken();
+        // 10. Gửi email xác thực thật bằng SMTP
+        var emailBody = $@"
+            <div style='font-family: Arial, sans-serif; padding: 20px; line-height: 1.6; color: #333;'>
+                <h2 style='color: #2563eb;'>Chào mừng {newUser.FullName} đến với ExamEngine!</h2>
+                <p>Cảm ơn bạn đã đăng ký tài khoản. Để hoàn tất, vui lòng nhập mã xác thực sau:</p>
+                <div style='margin: 20px 0;'>
+                    <span style='background-color: #f1f5f9; padding: 12px 24px; font-size: 28px; font-weight: bold; letter-spacing: 6px; color: #2563eb; border-radius: 8px; border: 1px dashed #2563eb;'>
+                        {verificationOtp}
+                    </span>
+                </div>
+                <p>Mã xác thực này có hiệu lực trong vòng <strong>15 phút</strong>.</p>
+                <p style='color: #64748b; font-size: 13px;'>Nếu bạn không thực hiện đăng ký tài khoản này, vui lòng bỏ qua email này.</p>
+            </div>";
 
-        var refreshToken = new RefreshToken
-        {
-            Id = Guid.NewGuid(),
-            Token = refreshTokenString,
-            UserId = newUser.Id,
-            ExpiresAtUtc = DateTime.UtcNow.AddDays(7),
-            CreatedAtUtc = DateTime.UtcNow,
-            IsRevoked = false
-        };
+        await _emailService.SendEmailAsync(newUser.Email, "Xác thực tài khoản ExamEngine", emailBody);
 
-        await _context.RefreshTokens.AddAsync(refreshToken);
-        await _context.SaveChangesAsync();
-
+        // Đăng ký xong trả về thông tin nhưng chưa cấp Token (vì cần kích hoạt email trước khi login)
         return new AuthResponseDto
         {
             UserId = newUser.Id,
             FullName = newUser.FullName,
             Email = newUser.Email,
             Role = role.Name,
-            AccessToken = token,
-            RefreshToken = refreshTokenString
+            AccessToken = string.Empty,
+            RefreshToken = string.Empty
         };
+    }
+
+    public async Task<bool> VerifyEmailAsync(VerifyEmailRequestDto request)
+    {
+        var cleanEmail = request.Email.Trim().ToLowerInvariant();
+
+        var user = await _context.Users
+            .FirstOrDefaultAsync(u => u.Email.ToLower() == cleanEmail);
+
+        if (user == null)
+        {
+            throw new Exception("Không tìm thấy tài khoản tương ứng với email này.");
+        }
+
+        if (user.IsEmailConfirmed)
+        {
+            throw new Exception("Tài khoản này đã được xác thực trước đó.");
+        }
+
+        if (user.VerificationToken != request.Token.Trim() || user.VerificationTokenExpiresAt <= DateTime.UtcNow)
+        {
+            throw new Exception("Mã xác thực không chính xác hoặc đã hết hạn.");
+        }
+
+        // Kích hoạt tài khoản và xóa token
+        user.IsEmailConfirmed = true;
+        user.VerificationToken = null;
+        user.VerificationTokenExpiresAt = null;
+
+        await _context.SaveChangesAsync();
+        return true;
     }
 
     public async Task<AuthResponseDto> LoginAsync(LoginRequestDto request)
@@ -126,6 +165,12 @@ public class AuthService : IAuthService
         if (!user.IsActive)
         {
             throw new Exception("Tài khoản của bạn đã bị khóa.");
+        }
+
+        // Chặn đăng nhập nếu chưa xác thực Email
+        if (!user.IsEmailConfirmed)
+        {
+            throw new Exception("Tài khoản chưa được kích hoạt. Vui lòng kiểm tra email để xác thực trước khi đăng nhập.");
         }
 
         var isPasswordValid = _passwordHasher.VerifyPassword(request.Password, user.PasswordHash);

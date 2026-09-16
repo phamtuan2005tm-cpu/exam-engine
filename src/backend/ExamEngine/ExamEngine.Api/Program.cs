@@ -81,6 +81,13 @@ namespace ExamEngine.Api
             // 4. Đăng ký tầng Infrastructure & Dependency Injection
             builder.Services.AddInfrastructureServices(builder.Configuration);
 
+            // Đăng ký cấu hình SMTP Gmail
+            builder.Services.Configure<ExamEngine.Application.DTOs.Email.EmailSettings>(
+                builder.Configuration.GetSection("EmailSettings"));
+
+            // Đăng ký EmailService
+            builder.Services.AddScoped<ExamEngine.Application.Interfaces.IEmailService, ExamEngine.Infrastructure.Services.EmailService>();
+
             builder.Services.AddScoped<IPasswordHasher, PasswordHasher>();
             builder.Services.AddScoped<IJwtTokenGenerator, JwtTokenGenerator>();
 

@@ -16,6 +16,12 @@ namespace ExamEngine.Domain.Entities
         public DateTime? UpdatedAt { get; set; }
         public bool IsActive { get; set; } = true;
         public bool IsEmailConfirmed { get; set; } = false;
+
+        // xác thực email 
+        public string? VerificationToken { get; set; }
+        public DateTime? VerificationTokenExpiresAt { get; set; }
+
+        // khóa ngoại
         public int RoleId { get; set; }
         public Role Role { get; set; } = null!;
    

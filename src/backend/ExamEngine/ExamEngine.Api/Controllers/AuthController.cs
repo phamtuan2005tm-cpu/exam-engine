@@ -76,4 +76,12 @@ public class AuthController : ControllerBase
         }
         return Ok(ApiResponse<string>.SuccessResult("Thu hồi Token thành công (Đăng xuất thiết bị)."));
     }
+
+
+    [HttpPost("verify-email")]
+    public async Task<IActionResult> VerifyEmail([FromBody] VerifyEmailRequestDto request)
+    {
+        var result = await _authService.VerifyEmailAsync(request);
+        return Ok(ApiResponse<bool>.SuccessResult(result, "Xác thực email thành công! Bây giờ bạn có thể đăng nhập."));
+    }
 }
