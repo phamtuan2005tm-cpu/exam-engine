@@ -47,6 +47,7 @@ namespace ExamEngine.Api
 
             builder.Services.AddAuthorization();
 
+            
             // 3. Swagger kèm nút Authorize (Bearer Token)
             builder.Services.AddEndpointsApiExplorer();
             builder.Services.AddSwaggerGen(c =>
@@ -96,7 +97,22 @@ namespace ExamEngine.Api
 
             builder.Services.AddScoped<IAuthService, AuthService>();
 
+            // Cors của frontend 
+            builder.Services.AddCors(options =>
+            {
+                options.AddPolicy("AllowReactApp", policy =>
+                {
+                    policy.WithOrigins("http://localhost:5173") // Cổng của Frontend Vite/React
+                          .AllowAnyHeader()
+                          .AllowAnyMethod()
+                          .AllowCredentials();
+                });
+            });
+
+
             var app = builder.Build();
+
+            
 
             // 5. Pipeline xử lý Request
             app.UseMiddleware<ExceptionHandlingMiddleware>();
@@ -108,6 +124,9 @@ namespace ExamEngine.Api
             }
 
             app.UseHttpsRedirection();
+
+            // của react 
+            app.UseCors("AllowReactApp");
 
             // Thứ tự bắt buộc: Xác thực trước, phân quyền sau
             app.UseAuthentication();
