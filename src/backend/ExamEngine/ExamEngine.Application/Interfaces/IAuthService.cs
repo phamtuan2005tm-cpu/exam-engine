@@ -14,5 +14,7 @@ namespace ExamEngine.Application.Interfaces
         Task<AuthResponseDto> RefreshTokenAsync(RefreshTokenRequestDto request);
         Task<bool> RevokeTokenAsync(RevokeTokenRequestDto request);
         Task<bool> VerifyEmailAsync(VerifyEmailRequestDto request);
+        Task<bool> ForgotPasswordAsync(ForgotPasswordRequestDto request);
+        Task<bool> ResetPasswordAsync(ResetPasswordRequestDto request);
     }
 }

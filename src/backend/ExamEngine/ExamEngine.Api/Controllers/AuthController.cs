@@ -84,4 +84,18 @@ public class AuthController : ControllerBase
         var result = await _authService.VerifyEmailAsync(request);
         return Ok(ApiResponse<bool>.SuccessResult(result, "Xác thực email thành công! Bây giờ bạn có thể đăng nhập."));
     }
+
+    [HttpPost("forgot-password")]
+    public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequestDto request)
+    {
+        await _authService.ForgotPasswordAsync(request);
+        return Ok(ApiResponse<string>.SuccessResult(string.Empty, "Nếu email tồn tại trong hệ thống, mã xác thực đã được gửi đi."));
+    }
+
+    [HttpPost("reset-password")]
+    public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequestDto request)
+    {
+        var result = await _authService.ResetPasswordAsync(request);
+        return Ok(ApiResponse<bool>.SuccessResult(result, "Đặt lại mật khẩu thành công! Bạn có thể đăng nhập bằng mật khẩu mới."));
+    }
 }

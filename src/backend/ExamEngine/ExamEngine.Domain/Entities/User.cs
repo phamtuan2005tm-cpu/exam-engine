@@ -21,6 +21,10 @@ namespace ExamEngine.Domain.Entities
         public string? VerificationToken { get; set; }
         public DateTime? VerificationTokenExpiresAt { get; set; }
 
+        // quên mật khẩu 
+        public string? PasswordResetToken { get; set; }
+        public DateTime? PasswordResetTokenExpiresAt { get; set; }
+
         // khóa ngoại
         public int RoleId { get; set; }
         public Role Role { get; set; } = null!;

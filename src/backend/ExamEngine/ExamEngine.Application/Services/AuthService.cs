@@ -278,4 +278,81 @@ public class AuthService : IAuthService
         await _context.SaveChangesAsync();
         return true;
     }
+    public async Task<bool> ForgotPasswordAsync(ForgotPasswordRequestDto request)
+    {
+        var cleanEmail = request.Email.Trim().ToLowerInvariant();
+
+        var user = await _context.Users
+            .FirstOrDefaultAsync(u => u.Email.ToLower() == cleanEmail);
+
+        // Chống Account Enumeration: Không báo lỗi nếu email không tồn tại để tránh hacker dò email
+        if (user == null || !user.IsActive)
+        {
+            return true;
+        }
+
+        var resetOtp = new Random().Next(100000, 999999).ToString();
+        user.PasswordResetToken = resetOtp;
+        user.PasswordResetTokenExpiresAt = DateTime.UtcNow.AddMinutes(15);
+
+        await _context.SaveChangesAsync();
+
+        var emailBody = $@"
+        <div style='font-family: Arial, sans-serif; padding: 20px; line-height: 1.6; color: #333;'>
+            <h2 style='color: #dc2626;'>Yêu cầu đặt lại mật khẩu</h2>
+            <p>Xin chào {user.FullName},</p>
+            <p>Chúng tôi nhận được yêu cầu đặt lại mật khẩu cho tài khoản ExamEngine của bạn. Mã xác thực là:</p>
+            <div style='margin: 20px 0;'>
+                <span style='background-color: #fef2f2; padding: 12px 24px; font-size: 28px; font-weight: bold; letter-spacing: 6px; color: #dc2626; border-radius: 8px; border: 1px dashed #dc2626;'>
+                    {resetOtp}
+                </span>
+            </div>
+            <p>Mã này có hiệu lực trong vòng <strong>15 phút</strong>. Tuyệt đối không chia sẻ mã này cho bất kỳ ai.</p>
+            <p style='color: #64748b; font-size: 13px;'>Nếu bạn không thực hiện yêu cầu này, hãy đổi mật khẩu ngay lập tức hoặc liên hệ quản trị viên.</p>
+        </div>";
+
+        await _emailService.SendEmailAsync(user.Email, "Đặt lại mật khẩu ExamEngine", emailBody);
+        return true;
+    }
+
+    public async Task<bool> ResetPasswordAsync(ResetPasswordRequestDto request)
+    {
+        var cleanEmail = request.Email.Trim().ToLowerInvariant();
+
+        if (request.NewPassword != request.ConfirmNewPassword)
+        {
+            throw new Exception("Mật khẩu xác nhận không khớp.");
+        }
+
+        var user = await _context.Users
+            .FirstOrDefaultAsync(u => u.Email.ToLower() == cleanEmail);
+
+        if (user == null || !user.IsActive)
+        {
+            throw new Exception("Yêu cầu không hợp lệ.");
+        }
+
+        if (user.PasswordResetToken != request.Token.Trim() || user.PasswordResetTokenExpiresAt <= DateTime.UtcNow)
+        {
+            throw new Exception("Mã xác thực không chính xác hoặc đã hết hạn.");
+        }
+
+        // 1. Cập nhật mật khẩu mới
+        user.PasswordHash = _passwordHasher.HashPassword(request.NewPassword);
+        user.PasswordResetToken = null;
+        user.PasswordResetTokenExpiresAt = null;
+
+        // 2. Bảo mật: Thu hồi toàn bộ Refresh Tokens cũ để buộc đăng xuất khỏi các thiết bị khác
+        var activeRefreshTokens = await _context.RefreshTokens
+            .Where(rt => rt.UserId == user.Id && !rt.IsRevoked)
+            .ToListAsync();
+
+        foreach (var token in activeRefreshTokens)
+        {
+            token.IsRevoked = true;
+        }
+
+        await _context.SaveChangesAsync();
+        return true;
+    }
 }
